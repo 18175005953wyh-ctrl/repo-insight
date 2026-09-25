@@ -21,6 +21,8 @@ class RepositoryTest(unittest.TestCase):
         self.root.mkdir()
 
     def clean_temporary(self):
+        if self.temporary.resolve().parent != Path(tempfile.gettempdir()).resolve() or not self.temporary.name.startswith("repo-insight-test-"):
+            raise RuntimeError("Refusing cleanup outside the test temporary directory.")
         for path in sorted(self.temporary.rglob("*"), key=lambda item: len(item.parts), reverse=True):
             if path.is_dir() and not path.is_symlink():
                 path.rmdir()
