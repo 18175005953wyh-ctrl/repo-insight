@@ -29,6 +29,22 @@ def table(headers: tuple[str, ...], rows: list[tuple]) -> str:
 
 def render_html(data: dict) -> str:
     scan, git = data["scan"], data["git"]
+    history = data.get("git_history")
+    hotspot_section = ""
+    if history is not None:
+        hotspot_table = table(("文件", "涉及提交", "新增", "删除", "总变更", "最后修改（作者时间）"), [
+            (item["path"], item["commit_count"], item["additions"], item["deletions"], item["churn"], item["last_changed_at"])
+            for item in history["hotspots"]
+        ])
+        binary_table = table(("文件", "涉及提交", "行数统计", "最后修改（作者时间）"), [
+            (item["path"], item["commit_count"], "未知（二进制）", item["last_changed_at"])
+            for item in history["binary_files"]
+        ])
+        warning_list = "".join(f"<li>{escape(warning)}</li>" for warning in history["warnings"])
+        hotspot_section = f"""<section class="panel full"><div class="heading"><h2>Git文件变更热点</h2><span class="section-no">HOTSPOTS</span></div>
+<p class="note">请求最近 {escape(history['requested_limit'])} 次提交，实际分析 {escape(history['analyzed_commits'])} 次。固定 HEAD：{escape(history['head'] or '无')}。按 churn（新增 + 删除）降序，再按提交次数降序、路径升序，最多展示 10 项。</p>
+{hotspot_table}<p class="callout">高 churn 不等于代码质量差。初次导入、核心功能迭代、生成文件也可能带来大量变化。使用 --no-renames，重命名前后分开统计；合并提交计入窗口但不重复统计其 diff。日期为窗口内最新作者时间。</p>
+<details><summary>二进制文件（不参与数值排行）</summary>{binary_table}</details><ul>{warning_list}</ul></section>"""
     total_markers = sum(scan["marker_counts"].values())
     cards = "".join(
         f"<article class='metric'><span>{escape(label)}</span><strong>{escape(value)}</strong><small>{escape(note)}</small></article>"
@@ -85,6 +101,7 @@ def render_html(data: dict) -> str:
 <body><header class="top"><div class="brand"><i></i>REPO INSIGHT</div><span>LOCAL REPOSITORY ANALYSIS · OFFLINE REPORT</span></header>
 <main><section class="hero"><div><p class="eyebrow">REPOSITORY SNAPSHOT</p><h1>{escape(data['repository_name'])}</h1><p class="subtitle">用可核对的数据，了解仓库的规模、历史与工程文件。</p><div class="path">工作区文件快照 / Git 提交历史 / 工程文件完整度</div></div><span class="badge">本地分析 · 无外部请求</span></section>
 <section class="metrics" aria-label="概览">{cards}</section>
+{hotspot_section}
 <div class="grid"><section class="panel"><div class="heading"><h2>文件类型分布</h2><span class="section-no">01 / FILES</span></div><p class="note">横条按数量最多的类型归一化；展示前八类。</p>{bars}<details><summary>查看全部文件类型与占比</summary>{type_table}</details></section>
 <section class="panel"><div class="heading"><h2>工程文件检查</h2><span class="section-no">02 / STRUCTURE</span></div><p class="note">检查仓库根目录中的约定文件与测试目录。</p><ul class="checklist">{checks}</ul><div class="callout">存在不代表内容完整或代码质量高。本报告不生成健康评分。</div></section></div>
 <div class="grid"><section class="panel"><div class="heading"><h2>最大的十个文件</h2><span class="section-no">03 / SIZE</span></div><p class="note">按文件字节数降序；二进制文件也参与统计。</p>{largest}</section>
