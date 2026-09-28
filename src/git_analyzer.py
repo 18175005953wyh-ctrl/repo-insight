@@ -2,11 +2,53 @@
 
 import os
 import subprocess
+import re
+from datetime import datetime
 from pathlib import Path
 
 
 class GitError(Exception):
     pass
+
+
+def parse_numstat_log(text: str) -> dict:
+    """Parse NUL-delimited numstat output; never execute Git or inspect files."""
+    commits, warnings = [], []
+    current = None
+    for index, raw in enumerate(text.split("\x00"), 1):
+        record = raw.lstrip("\n")
+        if not record:
+            continue
+        if record.startswith("commit:"):
+            current = None
+            fields = record[7:].split("\t")
+            try:
+                if len(fields) != 2 or not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", fields[0]):
+                    raise ValueError
+                date = datetime.fromisoformat(fields[1])
+                if date.tzinfo is None:
+                    raise ValueError
+            except ValueError:
+                warnings.append(f"Record {index}: invalid commit header; skipped.")
+                continue
+            current = {"hash": fields[0], "date": fields[1], "files": []}
+            commits.append(current)
+            continue
+        fields = record.split("\t", maxsplit=2)
+        if current is None or len(fields) != 3 or not fields[2]:
+            warnings.append(f"Record {index}: malformed or orphan numstat; skipped.")
+            continue
+        additions, deletions, path = fields
+        binary = additions == deletions == "-"
+        if not binary and not (re.fullmatch(r"[0-9]+", additions) and re.fullmatch(r"[0-9]+", deletions)):
+            warnings.append(f"Record {index}: invalid line counts; skipped.")
+            continue
+        try:
+            current["files"].append({"path": path, "additions": None if binary else int(additions),
+                                     "deletions": None if binary else int(deletions), "binary": binary})
+        except ValueError:
+            warnings.append(f"Record {index}: line count too large; skipped.")
+    return {"commits": commits, "warnings": warnings}
 
 
 def run_git(root: Path, *arguments: str, allow_failure: bool = False) -> subprocess.CompletedProcess:
