@@ -171,3 +171,83 @@ Skipped text files: 0 | Warnings: 0
 ## License
 
 MIT License，见 LICENSE。
+## Git文件变更热点
+
+### 指标定义
+
+本功能从固定 HEAD 的真实提交读取 `git log --numstat`，与“当前工作区文件扫描”分开统计。未提交的编辑不会改变 Git 热点；历史中已经删除的文件仍可能出现在热点中。
+
+- `commit_count`：窗口内涉及该路径的不同提交数量；同一提交同一路径只计一次。
+- `additions` / `deletions`：Git numstat 新增/删除行数之和。
+- `churn`：新增 + 删除，不是净增行数，也不是复杂度或质量分数。
+- `last_changed_at`：窗口内涉及该路径记录的最新作者时间（`%aI`），按带时区的真实时刻比较，不依赖日志顺序；作者时间可被修改，不保证等于合并时间。
+- `binary`：窗口内有任一次二进制记录即为 true，行数及 churn 为 null，避免把未知行数当作 0。此类文件保留提交次数与日期，单独列在 `binary_files`，不进入数值前十。
+
+排序固定为 churn 降序、commit_count 降序、path 字典序。JSON 的 `git_history.hotspots` 与 HTML 使用同一份前十数据；所有路径、日期和警告经过 HTML 转义。
+
+### 使用方法
+
+从项目目录运行（需要 Python 3.10+ 和 PATH 中可执行的 Git）：
+
+```bat
+python -B src/main.py . --output reports/hotspots --git-limit 100
+python -B -m unittest discover -s tests -v
+```
+
+也可把 `.` 换成另一个本地仓库目录。`--git-limit` 默认 100，必须是十进制正整数；0、负数、非数字被明确拒绝。它限制分析提交数，**不是热点文件数量**。原有总提交数、最近十次提交等字段保持原含义，历史读取与热点使用相同的固定 HEAD。
+
+报告新增 `git_history`，包含 `requested_limit`、`analyzed_commits`、`head`、`hotspots`、`binary_files`、`warnings`。仓库不足 N 次时记录实际提交数；空提交也计入分析窗口，空仓库返回空列表。Git 执行错误沿用原有非零退出码和清晰错误提示；损坏 numstat 记录警告后跳过，不使整份报告崩溃。
+
+底层命令相当于：
+
+```text
+git log --numstat -z --no-renames --no-ext-diff --no-textconv --diff-merges=off --root --format=commit:%H%x09%aI%x00 -n 100 <固定HEAD> --
+```
+
+复用原有 `run_git()` 列表参数、30 秒超时、返回码和标准错误检查，不启用 shell。纯解析函数 `parse_numstat_log()` 与聚合函数 `build_file_hotspots()` 不运行 Git。使用 NUL 分隔保留空格、制表符、换行路径；numstat 字段仅按前两个制表符分割。
+
+### 示例结果
+
+本项目在 HEAD `cfadc22` 的实际自分析结果（完整 HEAD 以 `examples/hotspots-cfadc22.json` 为准）：请求 100 次，实际分析 **6 次**，Top 5 为：
+
+| File | Commits | Additions | Deletions | Churn |
+|---|---:|---:|---:|---:|
+| README.md | 2 | 174 | 1 | 175 |
+| src/git_analyzer.py | 3 | 157 | 0 | 157 |
+| src/scanner.py | 1 | 138 | 0 | 138 |
+| src/report_generator.py | 2 | 131 | 0 | 131 |
+| tests/test_scanner.py | 1 | 109 | 0 | 109 |
+
+以上数值来自添加本节文档和新测试之前的功能提交，不会伪装成持续变化的最新结果。提交新的代码、测试和 README 后再次运行，数字变化是正常现象。完整热点及二进制记录保存在 `examples/hotspots-cfadc22.json`，不含机器绝对路径。
+
+如需精确重现该历史窗口，可在无同名目录时建立独立工作树，然后仍使用当前分析器读取它：
+
+```bat
+git worktree add --detach ../repo-insight-hotspot-example cfadc22
+python -B src/main.py ../repo-insight-hotspot-example --output reports/pinned-hotspots --git-limit 100
+```
+
+### 如何解读
+
+README 排名第一主要因为初次提交导入了文档，随后又补充说明。`src/git_analyzer.py` 涉及 3 次提交，包含初始实现、解析器和聚合功能迭代。二者都是可以解释的正常变化，不能据此认定代码质量差。
+
+热点可以提示“值得阅读哪些文件”，后续应结合文件规模、变更目的、测试及缺陷记录。当前工具没有测量测试覆盖率，也不把 TODO 次数、文件大小或 churn 合成健康评分。
+
+### 限制
+
+- 默认只分析最近 100 次 HEAD 可达提交，按 Git 默认历史遍历选取窗口，不跨分支汇总。
+- 二进制文件没有可靠行数；曾在窗口内被识别为二进制的路径整体退出数值排行。
+- 使用 `--no-renames`，重命名前后按不同路径处理；不追踪文件身份。
+- 合并提交计入窗口，但不统计其 diff，以免重复累加分支改动；因此合并时独有的冲突解决改动可能漏计。
+- 初始提交相对空树统计；浅克隆仅有本地历史，报告会提示，浅边界可能将快照视为新增，结果不宜与完整克隆直接比较。
+- 作者日期可乱序或人为设定；最新时间只反映当前窗口中记录的时间。
+- 路径按已有 Git 封装的 UTF-8 文本模式读取，不保证非 UTF-8 原始路径字节的无损往返。
+- 日志由原有封装一次捕获，提交数受限不等于输出字节数受限；大型仓库应使用较小窗口。
+- 重复 numstat 记录只对提交次数去重，行数仍累加各记录；正常的无重命名单父提交中同路径只有一条记录。
+- 高 churn 不等于代码质量评分。
+
+### 升级测试
+
+原有 38 项测试保持通过，新增 21 项，共 **59 项测试通过**。覆盖纯解析与聚合、空白和 Unicode 路径、损坏记录、二进制与文本转换、日期时区比较、排序、真实 Git 仓库、空仓库、空提交、浅历史提示、窗口与前十区分、无效参数、JSON/HTML 一致性和 HTML 转义。
+
+`tests/fixtures/git_numstat.txt` 是从本仓库真实初始提交 `5d98590` 导出的 NUL 分隔 Git 输出；包含 NUL，编辑器可能将其显示为二进制。解析器测试直接读取固定夹具，不依赖当前仓库状态。

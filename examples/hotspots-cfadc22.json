@@ -1,0 +1,118 @@
+{
+  "analyzed_commits": 6,
+  "requested_limit": 100,
+  "hotspots": [
+    {
+      "path": "README.md",
+      "commit_count": 2,
+      "additions": 174,
+      "deletions": 1,
+      "churn": 175,
+      "last_changed_at": "2026-09-25T21:47:18+08:00",
+      "binary": false
+    },
+    {
+      "path": "src/git_analyzer.py",
+      "commit_count": 3,
+      "additions": 157,
+      "deletions": 0,
+      "churn": 157,
+      "last_changed_at": "2026-09-28T23:47:03+08:00",
+      "binary": false
+    },
+    {
+      "path": "src/scanner.py",
+      "commit_count": 1,
+      "additions": 138,
+      "deletions": 0,
+      "churn": 138,
+      "last_changed_at": "2026-09-25T21:06:35+08:00",
+      "binary": false
+    },
+    {
+      "path": "src/report_generator.py",
+      "commit_count": 2,
+      "additions": 131,
+      "deletions": 0,
+      "churn": 131,
+      "last_changed_at": "2026-09-28T23:49:42+08:00",
+      "binary": false
+    },
+    {
+      "path": "tests/test_scanner.py",
+      "commit_count": 1,
+      "additions": 109,
+      "deletions": 0,
+      "churn": 109,
+      "last_changed_at": "2026-09-25T21:06:35+08:00",
+      "binary": false
+    },
+    {
+      "path": "tests/test_report_generator.py",
+      "commit_count": 1,
+      "additions": 80,
+      "deletions": 0,
+      "churn": 80,
+      "last_changed_at": "2026-09-25T21:06:35+08:00",
+      "binary": false
+    },
+    {
+      "path": "src/main.py",
+      "commit_count": 2,
+      "additions": 68,
+      "deletions": 2,
+      "churn": 70,
+      "last_changed_at": "2026-09-28T23:49:42+08:00",
+      "binary": false
+    },
+    {
+      "path": "tests/test_git_analyzer.py",
+      "commit_count": 1,
+      "additions": 66,
+      "deletions": 0,
+      "churn": 66,
+      "last_changed_at": "2026-09-25T21:06:35+08:00",
+      "binary": false
+    },
+    {
+      "path": "tests/test_cli.py",
+      "commit_count": 1,
+      "additions": 59,
+      "deletions": 0,
+      "churn": 59,
+      "last_changed_at": "2026-09-25T21:06:35+08:00",
+      "binary": false
+    },
+    {
+      "path": "tests/support.py",
+      "commit_count": 2,
+      "additions": 57,
+      "deletions": 0,
+      "churn": 57,
+      "last_changed_at": "2026-09-25T21:47:18+08:00",
+      "binary": false
+    }
+  ],
+  "binary_files": [
+    {
+      "path": "screenshots/cache-demo.png.png",
+      "commit_count": 1,
+      "additions": null,
+      "deletions": null,
+      "churn": null,
+      "last_changed_at": "2026-09-25T23:56:00+08:00",
+      "binary": true
+    },
+    {
+      "path": "screenshots/report.png",
+      "commit_count": 1,
+      "additions": null,
+      "deletions": null,
+      "churn": null,
+      "last_changed_at": "2026-09-25T21:47:18+08:00",
+      "binary": true
+    }
+  ],
+  "warnings": [],
+  "head": "cfadc22c4d6d348489b2b770781bb15959a13382"
+}

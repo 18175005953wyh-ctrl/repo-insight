@@ -2,11 +2,53 @@
 
 import os
 import subprocess
+import re
+from datetime import datetime
 from pathlib import Path
 
 
 class GitError(Exception):
     pass
+
+
+def parse_numstat_log(text: str) -> dict:
+    """Parse NUL-delimited numstat output; never execute Git or inspect files."""
+    commits, warnings = [], []
+    current = None
+    for index, raw in enumerate(text.split("\x00"), 1):
+        record = raw.lstrip("\n")
+        if not record:
+            continue
+        if record.startswith("commit:"):
+            current = None
+            fields = record[7:].split("\t")
+            try:
+                if len(fields) != 2 or not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", fields[0]):
+                    raise ValueError
+                date = datetime.fromisoformat(fields[1])
+                if date.tzinfo is None:
+                    raise ValueError
+            except ValueError:
+                warnings.append(f"Record {index}: invalid commit header; skipped.")
+                continue
+            current = {"hash": fields[0], "date": fields[1], "files": []}
+            commits.append(current)
+            continue
+        fields = record.split("\t", maxsplit=2)
+        if current is None or len(fields) != 3 or not fields[2]:
+            warnings.append(f"Record {index}: malformed or orphan numstat; skipped.")
+            continue
+        additions, deletions, path = fields
+        binary = additions == deletions == "-"
+        if not binary and not (re.fullmatch(r"[0-9]+", additions) and re.fullmatch(r"[0-9]+", deletions)):
+            warnings.append(f"Record {index}: invalid line counts; skipped.")
+            continue
+        try:
+            current["files"].append({"path": path, "additions": None if binary else int(additions),
+                                     "deletions": None if binary else int(deletions), "binary": binary})
+        except ValueError:
+            warnings.append(f"Record {index}: line count too large; skipped.")
+    return {"commits": commits, "warnings": warnings}
 
 
 def run_git(root: Path, *arguments: str, allow_failure: bool = False) -> subprocess.CompletedProcess:
@@ -29,6 +71,52 @@ def run_git(root: Path, *arguments: str, allow_failure: bool = False) -> subproc
     if result.returncode and not allow_failure:
         detail = result.stderr.strip() or "Git returned a nonzero exit status."
         raise GitError(f"Git command failed: {detail}")
+    return result
+
+
+def build_file_hotspots(commits: list[dict]) -> list[dict]:
+    """Aggregate exact paths; a binary observation makes line totals unknown."""
+    stats, seen = {}, set()
+    for commit in commits:
+        for record in commit["files"]:
+            path = record["path"]
+            item = stats.setdefault(path, {"path": path, "commit_count": 0, "additions": 0,
+                                          "deletions": 0, "churn": 0, "last_changed_at": commit["date"], "binary": False})
+            key = (commit["hash"], path)
+            if key not in seen:
+                item["commit_count"] += 1
+                seen.add(key)
+            if datetime.fromisoformat(commit["date"]) > datetime.fromisoformat(item["last_changed_at"]):
+                item["last_changed_at"] = commit["date"]
+            item["binary"] |= record["binary"]
+            if item["binary"]:
+                item["additions"] = item["deletions"] = item["churn"] = None
+            else:
+                item["additions"] += record["additions"]
+                item["deletions"] += record["deletions"]
+                item["churn"] = item["additions"] + item["deletions"]
+    return sorted(stats.values(), key=lambda item: (item["binary"], -(item["churn"] or 0), -item["commit_count"], item["path"]))
+
+
+def analyze_hotspots(root: Path, git: dict, limit: int = 100) -> dict:
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise ValueError("git-limit must be a positive integer.")
+    result = {"analyzed_commits": 0, "requested_limit": limit, "hotspots": [], "binary_files": [],
+              "warnings": [], "head": git["head"]}
+    if git["shallow"]:
+        result["warnings"].append("Shallow clone: only locally available history can be analyzed.")
+    if not git["head"]:
+        return result
+    log = run_git(root, "log", "--numstat", "-z", "--no-renames", "--no-ext-diff", "--no-textconv",
+                  "--diff-merges=off", "--root", "--format=commit:%H%x09%aI%x00", "-n", str(limit), git["head"], "--")
+    parsed = parse_numstat_log(log.stdout)
+    files = build_file_hotspots(parsed["commits"])
+    result.update(analyzed_commits=len({c["hash"] for c in parsed["commits"]}),
+                  hotspots=[f for f in files if not f["binary"]][:10],
+                  binary_files=[f for f in files if f["binary"]])
+    result["warnings"].extend(parsed["warnings"])
+    if log.stderr.strip():
+        result["warnings"].append(log.stderr.strip())
     return result
 
 
