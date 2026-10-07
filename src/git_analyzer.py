@@ -28,7 +28,8 @@ def parse_numstat_log(text: str) -> dict:
                 date = datetime.fromisoformat(fields[1])
                 if date.tzinfo is None:
                     raise ValueError
-            except ValueError:
+                date.astimezone(timezone.utc)  # Reject dates that overflow on UTC conversion.
+            except (ValueError, OverflowError):
                 warnings.append(f"Record {index}: invalid commit header; skipped.")
                 continue
             current = {"hash": fields[0], "date": fields[1], "files": []}
@@ -151,11 +152,11 @@ def _activity_bucket(start, period: str) -> dict:
             "churn": 0, "binary_changes": 0}
 
 
-def analyze_hotspots(root: Path, git: dict, limit: int = 100) -> dict:
+def analyze_git_history(root: Path, git: dict, limit: int = 100, trend_period: str = "week") -> dict:
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
         raise ValueError("git-limit must be a positive integer.")
     result = {"analyzed_commits": 0, "requested_limit": limit, "hotspots": [], "binary_files": [],
-              "warnings": [], "head": git["head"]}
+              "warnings": [], "head": git["head"], "activity": build_activity_trend([], trend_period)}
     if git["shallow"]:
         result["warnings"].append("Shallow clone: only locally available history can be analyzed.")
     if not git["head"]:
@@ -166,11 +167,17 @@ def analyze_hotspots(root: Path, git: dict, limit: int = 100) -> dict:
     files = build_file_hotspots(parsed["commits"])
     result.update(analyzed_commits=len({c["hash"] for c in parsed["commits"]}),
                   hotspots=[f for f in files if not f["binary"]][:10],
-                  binary_files=[f for f in files if f["binary"]])
+                  binary_files=[f for f in files if f["binary"]],
+                  activity=build_activity_trend(parsed["commits"], trend_period))
     result["warnings"].extend(parsed["warnings"])
     if log.stderr.strip():
         result["warnings"].append(log.stderr.strip())
     return result
+
+
+def analyze_hotspots(root: Path, git: dict, limit: int = 100) -> dict:
+    """Compatibility entry point; the existing hotspot fields retain their meaning."""
+    return analyze_git_history(root, git, limit)
 
 
 def repository_root(target: Path) -> Path:

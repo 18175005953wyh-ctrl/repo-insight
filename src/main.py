@@ -5,7 +5,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from git_analyzer import GitError, analyze_git, analyze_hotspots, repository_root
+from git_analyzer import GitError, analyze_git, analyze_git_history, repository_root
 from report_generator import write_reports
 from scanner import scan_repository
 
@@ -20,11 +20,23 @@ def positive_integer(value: str) -> int:
     return number
 
 
+def format_activity_summary(activity: dict) -> str:
+    buckets = activity["buckets"]
+    if not buckets:
+        return "No Git activity in this history window."
+    lines = [f"Git Activity Trend ({activity['period']}, {activity['timezone']}; latest {min(8, len(buckets))} of {len(buckets)} buckets):"]
+    for bucket in buckets[-8:]:
+        lines.append(f"{bucket['period_start']}  commits={bucket['commit_count']}  files={bucket['files_changed']}  "
+                     f"+{bucket['additions']}/-{bucket['deletions']}  churn={bucket['churn']}  binary={bucket['binary_changes']}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Analyze a local Git repository and generate JSON/HTML reports.")
     parser.add_argument("target", type=Path, help="Repository directory or a directory inside it")
     parser.add_argument("--output", type=Path, default=Path("reports"), help="Report directory (default: ./reports)")
-    parser.add_argument("--git-limit", type=positive_integer, default=100, help="Maximum commits for hotspots (default: 100; not number of files)")
+    parser.add_argument("--git-limit", type=positive_integer, default=100, help="Maximum commits for hotspots and activity (default: 100; not number of files or buckets)")
+    parser.add_argument("--trend-period", choices=("day", "week", "month"), default="week", help="UTC activity bucket period (default: week; weeks start Monday)")
     args = parser.parse_args(argv)
     try:
         target = args.target.expanduser().resolve()
@@ -39,9 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         if any(part.lower() == ".git" for part in output.parts):
             raise ValueError("Output cannot be inside .git metadata.")
         git = analyze_git(root)
-        history = analyze_hotspots(root, git, args.git_limit)
+        history = analyze_git_history(root, git, args.git_limit, args.trend_period)
         scan = scan_repository(root, (output,))
-        data = {"schema_version": 1, "generated_at": datetime.now(timezone.utc).isoformat(),
+        data = {"schema_version": 2, "generated_at": datetime.now(timezone.utc).isoformat(),
                 "repository_name": root.name, "repository_path": str(root), "git": git, "scan": scan, "git_history": history}
         write_reports(data, output)
     except (ValueError, OSError, GitError) as error:
@@ -56,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{index}. {item['path']!r}  {item['commit_count']} commits  +{item['additions']}/-{item['deletions']}  churn={item['churn']}")
     if not history["hotspots"]:
         print("No numeric file hotspots in this history window.")
+    print(format_activity_summary(history["activity"]))
     for warning in history["warnings"]:
         print(f"Git history warning: {warning}", file=sys.stderr)
     print(f"JSON: {output / 'report.json'}\nHTML: {output / 'report.html'}")

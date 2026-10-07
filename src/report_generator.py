@@ -27,10 +27,36 @@ def table(headers: tuple[str, ...], rows: list[tuple]) -> str:
     return f"<div class='table-scroll'><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>"
 
 
+def render_activity(activity: dict) -> str:
+    """Only slice the presentation; do not mutate or truncate the JSON model."""
+    buckets = activity["buckets"][-12:]
+    activity_table = table(("周期开始", "提交", "变更文件", "新增", "删除", "Churn", "二进制记录"), [
+        tuple(bucket[key] for key in ("period_start", "commit_count", "files_changed", "additions", "deletions", "churn", "binary_changes"))
+        for bucket in buckets
+    ])
+    charts = []
+    for key, label in (("commit_count", "提交数量"), ("churn", "文本 Churn")):
+        maximum = max((bucket[key] for bucket in buckets), default=0)
+        bars = []
+        for bucket in buckets:
+            width = 100 * bucket[key] / maximum if maximum else 0
+            bars.append(f"<div class='bar-row'><span>{escape(bucket['period_start'])}</span>"
+                        f"<div class='track'><div class='bar' style='width:{width:.2f}%'></div></div>"
+                        f"<b>{escape(bucket[key])}</b></div>")
+        charts.append(f"<div><h3>{escape(label)}</h3>{''.join(bars)}</div>")
+    empty = "<p class='empty'>No Git activity in this history window.</p>" if not buckets else ""
+    return f"""<section class="panel full" id="git-activity"><div class="heading"><h2>Git提交活动趋势</h2><span class="section-no">ACTIVITY</span></div>
+<p class="note">周期：{escape(activity['period'])}；时区：{escape(activity['timezone'])}。周从周一开始，使用作者时间。</p>
+<p class="note">HTML展示最近12个周期；完整数据请查看report.json。当前展示 {len(buckets)} / {len(activity['buckets'])} 桶。横条分别按所展示数据最大值归一化。</p>
+{empty}{activity_table}<div class="grid">{''.join(charts)}</div>
+<p class="callout">Churn 只累加文本记录，二进制记录单独计数，其未知行数不等于零。空提交和合并提交仍计入提交数；合并 diff 沿用热点规则不重复累加。高提交数或 churn 不代表代码质量高。</p></section>"""
+
+
 def render_html(data: dict) -> str:
     scan, git = data["scan"], data["git"]
     history = data.get("git_history")
     hotspot_section = ""
+    activity_section = render_activity(history["activity"]) if history and "activity" in history else ""
     if history is not None:
         hotspot_table = table(("文件", "涉及提交", "新增", "删除", "总变更", "最后修改（作者时间）"), [
             (item["path"], item["commit_count"], item["additions"], item["deletions"], item["churn"], item["last_changed_at"])
@@ -102,6 +128,7 @@ def render_html(data: dict) -> str:
 <main><section class="hero"><div><p class="eyebrow">REPOSITORY SNAPSHOT</p><h1>{escape(data['repository_name'])}</h1><p class="subtitle">用可核对的数据，了解仓库的规模、历史与工程文件。</p><div class="path">工作区文件快照 / Git 提交历史 / 工程文件完整度</div></div><span class="badge">本地分析 · 无外部请求</span></section>
 <section class="metrics" aria-label="概览">{cards}</section>
 {hotspot_section}
+{activity_section}
 <div class="grid"><section class="panel"><div class="heading"><h2>文件类型分布</h2><span class="section-no">01 / FILES</span></div><p class="note">横条按数量最多的类型归一化；展示前八类。</p>{bars}<details><summary>查看全部文件类型与占比</summary>{type_table}</details></section>
 <section class="panel"><div class="heading"><h2>工程文件检查</h2><span class="section-no">02 / STRUCTURE</span></div><p class="note">检查仓库根目录中的约定文件与测试目录。</p><ul class="checklist">{checks}</ul><div class="callout">存在不代表内容完整或代码质量高。本报告不生成健康评分。</div></section></div>
 <div class="grid"><section class="panel"><div class="heading"><h2>最大的十个文件</h2><span class="section-no">03 / SIZE</span></div><p class="note">按文件字节数降序；二进制文件也参与统计。</p>{largest}</section>
