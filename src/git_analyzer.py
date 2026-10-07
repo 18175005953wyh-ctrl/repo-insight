@@ -11,6 +11,11 @@ class GitError(Exception):
     pass
 
 
+def _git_timestamp(value: str) -> datetime:
+    # Python 3.10 does not accept ISO's Z suffix; Git may emit it for UTC.
+    return datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+
+
 def parse_numstat_log(text: str) -> dict:
     """Parse NUL-delimited numstat output; never execute Git or inspect files."""
     commits, warnings = [], []
@@ -25,7 +30,7 @@ def parse_numstat_log(text: str) -> dict:
             try:
                 if len(fields) != 2 or not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", fields[0]):
                     raise ValueError
-                date = datetime.fromisoformat(fields[1])
+                date = _git_timestamp(fields[1])
                 if date.tzinfo is None:
                     raise ValueError
                 date.astimezone(timezone.utc)  # Reject dates that overflow on UTC conversion.
@@ -87,7 +92,7 @@ def build_file_hotspots(commits: list[dict]) -> list[dict]:
             if key not in seen:
                 item["commit_count"] += 1
                 seen.add(key)
-            if datetime.fromisoformat(commit["date"]) > datetime.fromisoformat(item["last_changed_at"]):
+            if _git_timestamp(commit["date"]) > _git_timestamp(item["last_changed_at"]):
                 item["last_changed_at"] = commit["date"]
             item["binary"] |= record["binary"]
             if item["binary"]:
@@ -109,7 +114,7 @@ def build_activity_trend(commits: list[dict], period: str = "week") -> dict:
         raise ValueError("trend-period must be day, week or month.")
     buckets, paths = {}, {}
     for commit in commits:
-        timestamp = datetime.fromisoformat(commit["date"])
+        timestamp = _git_timestamp(commit["date"])
         if timestamp.tzinfo is None:
             raise ValueError("Git activity requires timezone-aware author dates.")
         start = timestamp.astimezone(timezone.utc).date()
