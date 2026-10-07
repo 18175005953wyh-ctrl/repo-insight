@@ -14,6 +14,7 @@
 - 统计成功解码的 UTF-8 文本非空行，列出最大的十个普通文件。
 - 搜索 TODO、FIXME、BUG，保留文件、行号和文本片段。
 - 通过 Git 读取当前 HEAD 可达的提交总数、最近一次及十次提交、提交者身份数。
+- 复用一次 numstat 历史读取，同时输出文件热点和按 UTC 日、周、月的提交活动趋势。
 - 检查根目录 README.md、.gitignore、LICENSE 和 tests/ 或 test/。
 - 生成同一份数据对应的 report.json 和离线、自包含、适配手机宽度的 report.html。
 - 处理错误路径、非 Git 目录、Git 缺失、读取失败、解码失败、空仓库和报告写入错误。
@@ -165,7 +166,7 @@ Skipped text files: 0 | Warnings: 0
 
 ## 后续改进与练习到的能力
 
-后续可以加入目录维度统计、提交时间趋势、两仓库对比、CSV 导出、Git ignore 规则支持及 GitHub Actions 自动报告；这些尚未实现。
+后续可以加入目录维度统计、两仓库对比、CSV 导出和 Git ignore 规则支持；这些尚未实现。提交时间趋势和 GitHub Actions 自动测试已在本次升级加入，工作流不上传报告。
 本项目练习了路径处理、递归剪枝、字典与排序、安全调用外部进程、异常处理、结构化输出、HTML 转义、响应式布局与自动化测试。
 
 ## License
@@ -251,3 +252,135 @@ README 排名第一主要因为初次提交导入了文档，随后又补充说�
 原有 38 项测试保持通过，新增 21 项，共 **59 项测试通过**。覆盖纯解析与聚合、空白和 Unicode 路径、损坏记录、二进制与文本转换、日期时区比较、排序、真实 Git 仓库、空仓库、空提交、浅历史提示、窗口与前十区分、无效参数、JSON/HTML 一致性和 HTML 转义。
 
 `tests/fixtures/git_numstat.txt` 是从本仓库真实初始提交 `5d98590` 导出的 NUL 分隔 Git 输出；包含 NUL，编辑器可能将其显示为二进制。解析器测试直接读取固定夹具，不依赖当前仓库状态。
+
+## Git提交活动趋势
+
+### 统计口径
+
+`analyze_git_history()` 执行一次有 `--numstat -z` 的历史命令，调用一次
+`parse_numstat_log()`；同一份 `commits` 同时传给 `build_file_hotspots()` 和
+`build_activity_trend()`，不会为了趋势重复执行 numstat。原来的 Git 总数、最近提交、
+提交者统计仍有各自的轻量查询；“一次读取”指共享热点与趋势所需的 numstat 数据。
+`analyze_hotspots()` 保留为兼容入口。
+
+| 字段 | 含义 |
+|---|---|
+| commit_count | 时间桶内提交数，包含空提交与合并提交 |
+| files_changed | 时间桶中有效 numstat 记录出现过的不同路径数，包含二进制路径 |
+| additions / deletions | 所有有效文本记录新增 / 删除行数之和 |
+| churn | additions + deletions，仅统计已知文本行数 |
+| binary_changes | 二进制 numstat 记录条数，不是不同二进制文件数 |
+
+同路径多次出现仅对 files_changed 去重；行数与二进制记录次数仍按每条有效记录累加。
+合并提交不重复计算 diff，因此可能遗漏合并时独有的冲突解决改动。
+某路径既有文本又有二进制记录时，趋势保留其已知文本记录的行数，二进制未知部分单独计数。
+热点仍沿用旧规则：该路径整体退出数值排行。两种结果的口径不同，不应直接将热点前十之和当作趋势总量。
+
+### UTC与时间分桶
+
+先把 Git 作者时间（`%aI`）解析为带时区的时间，再转换成 UTC：
+
+```text
+2026-10-02T00:30:00+08:00 → 2026-10-01T16:30:00+00:00
+```
+
+两者属于同一 UTC 日，不能直接截取原始字符串的前十位。Git 输出的 `Z` 后缀
+会转为等价的 `+00:00` 后解析，兼容 Python 3.10；旧热点原始时间字符串保持原样。
+
+- day：UTC 日期，键为 `YYYY-MM-DD`。
+- week：UTC 周一开始，键为该周周一日期；跨年时可能属于上一年的周一。
+- month：UTC 年月，键为 `YYYY-MM`。
+- 桶按时间升序；仅在当前历史窗口最早桶到最晚桶之间补零，不延伸至今天。
+- 空仓库保留空 buckets；空提交仍有一个 commit_count 为 1、churn 为 0 的桶。
+- 损坏 numstat 与非法日期沿用 warnings 后跳过；UTC 转换溢出的日期也会被拒绝。
+
+### 使用方法
+
+以下每条都是单行命令，可用于 PowerShell 或普通终端：
+
+```text
+python -B src/main.py . --output reports/trends --git-limit 100 --trend-period day
+python -B src/main.py . --output reports/trends-week --git-limit 100 --trend-period week
+python -B src/main.py . --output reports/trends-month --git-limit 100 --trend-period month
+```
+
+默认 week，参数大小写敏感，`year`、`Week` 等由 argparse 拒绝。
+`--git-limit` 同时限制热点与趋势的提交窗口，不限制文件数或桶数。
+
+JSON 的 `git_history.activity` 保存 period、timezone 和完整 buckets；HTML 在热点之后
+显示最近 12 桶、数据表、提交数量和文本 churn 两组横条，终端显示最近 8 桶。
+横条分别按当前展示数据最大值归一化，最大值为零时宽度为零。
+页面继续使用内联 CSS、原 CSP 和文本转义，无 JavaScript、外部资源或网络请求。
+
+本次输出 `schema_version` 从 1 升为 **2**，只增加 activity，不删除原有
+`hotspots`、`binary_files`、`requested_limit`、`analyzed_commits`、`warnings`、`head` 字段。
+忽略未知字段的旧读取者可继续使用旧字段；严格检查 schema 版本的读取者需自行适配。
+这不是通用版本迁移系统；HTML 渲染仍能处理没有 activity 的旧数据。
+
+### 实际结果
+
+以下来自本仓库固定 HEAD **`9060187b14a3609a4778fc61063de4cf45eb0c76`**，
+请求 100 次，实际读取 **14 次提交**。数据在新增这节 README 之前生成，完整快照见
+[`examples/activity-trend-9060187.json`](examples/activity-trend-9060187.json)，不含机器绝对路径。
+
+| Period (UTC day) | Commits | Files | Additions | Deletions | Churn | Binary records |
+|---|---:|---:|---:|---:|---:|---:|
+| 2026-09-25 | 3 | 16 | 947 | 1 | 948 | 2 |
+| 2026-09-26 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-09-27 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-09-28 | 4 | 7 | 471 | 2 | 473 | 1 |
+| 2026-09-29 | 2 | 1 | 0 | 0 | 0 | 1 |
+| 2026-09-30 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-10-01 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-10-02 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-10-03 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-10-04 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-10-05 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-10-06 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2026-10-07 | 5 | 5 | 443 | 12 | 455 | 0 |
+
+在无同名目录时，可建立固定提交的独立工作树，用当前程序读取它以复现：
+
+```text
+git worktree add --detach ../repo-insight-activity-example 9060187b14a3609a4778fc61063de4cf45eb0c76
+python -B src/main.py ../repo-insight-activity-example --output reports/pinned-activity --git-limit 100 --trend-period day
+```
+
+比较 `git_history.activity`，不要比较扫描路径、生成时间或后来变化的工作区文件统计。
+固定快照共有 13 桶，因此 HTML 只显示从 2026-09-26 起的 12 桶，终端只显示从
+2026-09-30 起的 8 桶；最早一桶仍完整保存在 JSON。
+
+### 如何解读
+
+9 月 25 日 churn 主要来自初次导入；9 月 29 日有提交、二进制记录，但文本 churn 为零，
+不能据此说“没有变化”。中间的零桶表示所选历史中该 UTC 周期没有提交，
+不能证明作者那天没有学习或编码。10 月 7 日的记录按实际 Git 作者时间归桶，
+不根据报告运行日期改写。提交粒度、导入内容、截图和合并规则都会影响数字。
+高提交数量或 churn 不等于项目质量高，不生成评分或作者排名。
+
+### 限制
+
+- 仅分析固定 HEAD 的本地可达历史窗口；浅克隆、重命名、合并 diff 规则与热点分析一致。
+- 作者时间可以人为设置，与 GitHub 合并时间或现实工作时段不等价。
+- 文本 churn 不包含二进制未知行数，不能当作全部字节改变量。
+- 补零范围由作者日期跨度决定；小提交窗口仍可能因很大的时间跨度产生很多桶。
+- 聚合约 O(R + B)，R 为 numstat 记录数、B 为补齐后的桶数；去重集合与路径量相关。
+- 不新增分支比较、作者排名、预测、健康评分或工具运行时的 GitHub API 调用。
+
+### 本次测试与CI
+
+2026-10-08 本地 Windows / Python 3.12.14 实际运行，原有 **59** 项加新增 **43** 项，
+共 **102 项全部通过，无跳过**：
+
+```text
+Ran 102 tests in 25.517s
+OK
+```
+
+新增检查覆盖 UTC 跨日、Z 后缀、跨年周/月、闰日、零周期、空提交、路径去重、
+二进制与文本混合、输入不变性、损坏记录、热点兼容、共享 limit、一次 numstat/解析、
+schema 2、终端 8 桶、HTML 12 桶、JSON 全量、转义、CSP 和横条零值。
+
+`.github/workflows/tests.yml` 在 push、pull_request 和手动触发时运行
+Ubuntu / Windows × Python 3.10 / 3.12 的四组 unittest，不安装第三方依赖、不上传报告。
+**远程工作流状态待实际运行确认，本地通过不代表 CI 已通过。**
