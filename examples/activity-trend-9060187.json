@@ -1,0 +1,129 @@
+{
+  "schema_version": 2,
+  "head": "9060187b14a3609a4778fc61063de4cf45eb0c76",
+  "requested_limit": 100,
+  "analyzed_commits": 14,
+  "activity": {
+    "period": "day",
+    "timezone": "UTC",
+    "buckets": [
+      {
+        "period_start": "2026-09-25",
+        "commit_count": 3,
+        "files_changed": 16,
+        "additions": 947,
+        "deletions": 1,
+        "churn": 948,
+        "binary_changes": 2
+      },
+      {
+        "period_start": "2026-09-26",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-09-27",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-09-28",
+        "commit_count": 4,
+        "files_changed": 7,
+        "additions": 471,
+        "deletions": 2,
+        "churn": 473,
+        "binary_changes": 1
+      },
+      {
+        "period_start": "2026-09-29",
+        "commit_count": 2,
+        "files_changed": 1,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 1
+      },
+      {
+        "period_start": "2026-09-30",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-10-01",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-10-02",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-10-03",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-10-04",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-10-05",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-10-06",
+        "commit_count": 0,
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0,
+        "churn": 0,
+        "binary_changes": 0
+      },
+      {
+        "period_start": "2026-10-07",
+        "commit_count": 5,
+        "files_changed": 5,
+        "additions": 443,
+        "deletions": 12,
+        "churn": 455,
+        "binary_changes": 0
+      }
+    ]
+  }
+}

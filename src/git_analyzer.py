@@ -3,12 +3,17 @@
 import os
 import subprocess
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
 class GitError(Exception):
     pass
+
+
+def _git_timestamp(value: str) -> datetime:
+    # Python 3.10 does not accept ISO's Z suffix; Git may emit it for UTC.
+    return datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
 
 
 def parse_numstat_log(text: str) -> dict:
@@ -25,10 +30,11 @@ def parse_numstat_log(text: str) -> dict:
             try:
                 if len(fields) != 2 or not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", fields[0]):
                     raise ValueError
-                date = datetime.fromisoformat(fields[1])
+                date = _git_timestamp(fields[1])
                 if date.tzinfo is None:
                     raise ValueError
-            except ValueError:
+                date.astimezone(timezone.utc)  # Reject dates that overflow on UTC conversion.
+            except (ValueError, OverflowError):
                 warnings.append(f"Record {index}: invalid commit header; skipped.")
                 continue
             current = {"hash": fields[0], "date": fields[1], "files": []}
@@ -86,7 +92,7 @@ def build_file_hotspots(commits: list[dict]) -> list[dict]:
             if key not in seen:
                 item["commit_count"] += 1
                 seen.add(key)
-            if datetime.fromisoformat(commit["date"]) > datetime.fromisoformat(item["last_changed_at"]):
+            if _git_timestamp(commit["date"]) > _git_timestamp(item["last_changed_at"]):
                 item["last_changed_at"] = commit["date"]
             item["binary"] |= record["binary"]
             if item["binary"]:
@@ -98,11 +104,64 @@ def build_file_hotspots(commits: list[dict]) -> list[dict]:
     return sorted(stats.values(), key=lambda item: (item["binary"], -(item["churn"] or 0), -item["commit_count"], item["path"]))
 
 
-def analyze_hotspots(root: Path, git: dict, limit: int = 100) -> dict:
+def build_activity_trend(commits: list[dict], period: str = "week") -> dict:
+    """Aggregate validated numstat records by UTC author date, without I/O.
+
+    Binary observations have unknown line counts: count them separately while
+    summing only text records, including text observations of the same path.
+    """
+    if period not in {"day", "week", "month"}:
+        raise ValueError("trend-period must be day, week or month.")
+    buckets, paths = {}, {}
+    for commit in commits:
+        timestamp = _git_timestamp(commit["date"])
+        if timestamp.tzinfo is None:
+            raise ValueError("Git activity requires timezone-aware author dates.")
+        start = timestamp.astimezone(timezone.utc).date()
+        if period == "week":
+            start -= timedelta(days=start.weekday())
+        elif period == "month":
+            start = start.replace(day=1)
+        if start not in buckets:
+            buckets[start] = _activity_bucket(start, period)
+            paths[start] = set()
+        bucket = buckets[start]
+        bucket["commit_count"] += 1
+        for record in commit["files"]:
+            paths[start].add(record["path"])
+            if record["binary"]:
+                bucket["binary_changes"] += 1
+            else:
+                bucket["additions"] += record["additions"]
+                bucket["deletions"] += record["deletions"]
+        bucket["files_changed"] = len(paths[start])
+        bucket["churn"] = bucket["additions"] + bucket["deletions"]
+    result = {"period": period, "timezone": "UTC", "buckets": []}
+    if not buckets:
+        return result
+    start, end = min(buckets), max(buckets)
+    while True:
+        result["buckets"].append(buckets.get(start) or _activity_bucket(start, period))
+        if start == end:
+            break  # Avoid advancing beyond datetime's maximum year.
+        if period == "month":
+            start = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
+        else:
+            start += timedelta(days=7 if period == "week" else 1)
+    return result
+
+
+def _activity_bucket(start, period: str) -> dict:
+    return {"period_start": start.isoformat()[:7] if period == "month" else start.isoformat(),
+            "commit_count": 0, "files_changed": 0, "additions": 0, "deletions": 0,
+            "churn": 0, "binary_changes": 0}
+
+
+def analyze_git_history(root: Path, git: dict, limit: int = 100, trend_period: str = "week") -> dict:
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
         raise ValueError("git-limit must be a positive integer.")
     result = {"analyzed_commits": 0, "requested_limit": limit, "hotspots": [], "binary_files": [],
-              "warnings": [], "head": git["head"]}
+              "warnings": [], "head": git["head"], "activity": build_activity_trend([], trend_period)}
     if git["shallow"]:
         result["warnings"].append("Shallow clone: only locally available history can be analyzed.")
     if not git["head"]:
@@ -113,11 +172,17 @@ def analyze_hotspots(root: Path, git: dict, limit: int = 100) -> dict:
     files = build_file_hotspots(parsed["commits"])
     result.update(analyzed_commits=len({c["hash"] for c in parsed["commits"]}),
                   hotspots=[f for f in files if not f["binary"]][:10],
-                  binary_files=[f for f in files if f["binary"]])
+                  binary_files=[f for f in files if f["binary"]],
+                  activity=build_activity_trend(parsed["commits"], trend_period))
     result["warnings"].extend(parsed["warnings"])
     if log.stderr.strip():
         result["warnings"].append(log.stderr.strip())
     return result
+
+
+def analyze_hotspots(root: Path, git: dict, limit: int = 100) -> dict:
+    """Compatibility entry point; the existing hotspot fields retain their meaning."""
+    return analyze_git_history(root, git, limit)
 
 
 def repository_root(target: Path) -> Path:
