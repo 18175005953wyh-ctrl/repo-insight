@@ -383,4 +383,4 @@ schema 2、终端 8 桶、HTML 12 桶、JSON 全量、转义、CSP 和横条零�
 
 `.github/workflows/tests.yml` 在 push、pull_request 和手动触发时运行
 Ubuntu / Windows × Python 3.10 / 3.12 的四组 unittest，不安装第三方依赖、不上传报告。
-**远程工作流状态待实际运行确认，本地通过不代表 CI 已通过。**
+**GitHub Actions 已于 2026-10-08 验证通过：Ubuntu 和 Windows 环境下的 Python 3.10、3.12 测试矩阵均成功完成。**
